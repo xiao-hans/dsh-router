@@ -1,0 +1,29 @@
+{
+  "name": "dsh-router",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Behavior routing (spec / mixed / react / weak) and progressive tool disclosure for DeepSeek Harness",
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "cordis", "routing", "agent"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanxiao827/dsh-router.git"
+  },
+  "homepage": "https://github.com/hanxiao827/dsh-router#readme",
+  "bugs": { "url": "https://github.com/hanxiao827/dsh-router/issues" },
+  "main": "lib/index.js",
+  "exports": {
+    ".": { "default": "./lib/index.js" },
+    "./core": { "default": "./lib/core.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "cordis.patch.yml", "README.md", "LICENSE"],
+  "engines": { "node": "^22.19 || >=24" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "dshTarget": "0.2.1-rc.2",
+  "license": "MIT"
+}

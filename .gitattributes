@@ -1,0 +1,4 @@
+# Keep repository text in LF regardless of the developer's platform.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

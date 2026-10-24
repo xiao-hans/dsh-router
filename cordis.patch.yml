@@ -1,0 +1,12 @@
+# dsh-router bundle patch.
+#
+# A single row in the host plugin layer. `name` resolves as a module specifier,
+# so this works both as a published package and as a local `file:` dependency.
+- insert:
+    - id: dsh-router
+      name: dsh-router
+      config:
+        # auto | weak | spec | mixed | react | 0-1 | 0-100
+        mode: auto
+        # false keeps the persona rewriting but disables tool disclosure.
+        phases: true
