@@ -142,3 +142,17 @@ test('stageText names the current phase and the next unlock', () => {
   assert.match(text, /Next phase "拟合方案"/)
   assert.match(stageText(3, allowListFor(3, null)), /All tools are unlocked/)
 })
+
+test('stageText never claims a partial list at the unrestricted phase', () => {
+  // allowListFor returns null at the final phase because nothing is restricted;
+  // callers pass [] in that case. The text must not then say "routing tools only"
+  // while simultaneously promising the full registry.
+  const text = stageText(3, [])
+  assert.doesNotMatch(text, /routing tools only/)
+  assert.match(text, /every tool in the registry/)
+})
+
+test('statusReport and stageText agree about the final phase', async () => {
+  const final = stageText(3, allowListFor(3, null) ?? [])
+  assert.doesNotMatch(final, /routing tools only/)
+})
