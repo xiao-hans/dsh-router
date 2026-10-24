@@ -17,7 +17,8 @@ const KNOWN = [
   'read', 'write', 'edit', 'glob', 'grep', 'ops_bash', 'pwsh', 'todo_write',
   'ask_user_question', 'present', 'working_directory', 'compress', 'acp_status',
   'decompress', 'search_context', 'router_status', 'router_mode', 'router_advance',
-  'web_search', 'skill', 'exit_plan_mode',
+  'router_begin', 'tools_catalog', 'tools_help', 'delivery_check',
+  'web_search', 'skill', 'exit_plan_mode', 'read_image', 'job_list',
 ]
 
 /** Minimal stand-in for the agent-scoped tool registry. */
@@ -28,6 +29,19 @@ function fakeAgent({ known = KNOWN, rejectUnknown = true } = {}) {
   }
   agent.ctx = {
     tools: {
+      // `view(scope)` is what tools_catalog reads: it must project the same
+      // registry the restriction path validates against.
+      view() {
+        const visible = new Map()
+        for (const toolName of known) {
+          visible.set(toolName, {
+            name: toolName,
+            description: `the ${toolName} tool.`,
+            parameters: { type: 'object', properties: { path: { type: 'string', description: 'a path' } } },
+          })
+        }
+        return { visible, knownNames: new Set(known), restrictableNames: new Set(known) }
+      },
       restrict(filter) {
         if (filter.allow === undefined && filter.deny === undefined) {
           throw new Error('tools.restrict({}) is a no-op: pass `allow` and/or `deny`')
@@ -78,11 +92,19 @@ test('declares the two services it needs', () => {
   assert.deepEqual([...inject].sort(), ['systemPrompt', 'tools'])
 })
 
-test('registers exactly the three routing tools with output+render', () => {
+test('registers every routing and disclosure tool with output+render', () => {
   const { ctx, registered } = fakeCtx()
   apply(ctx, { mode: 'auto', phases: true })
   const names = registered.map((tool) => tool.name).sort()
-  assert.deepEqual(names, ['router_advance', 'router_mode', 'router_status'])
+  assert.deepEqual(names, [
+    'delivery_check',
+    'router_advance',
+    'router_begin',
+    'router_mode',
+    'router_status',
+    'tools_catalog',
+    'tools_help',
+  ])
   for (const tool of registered) {
     assert.equal(typeof tool.description, 'string')
     assert.equal(typeof tool.execute, 'function')
@@ -118,9 +140,10 @@ test('pre-step lifts the restriction at the final phase', async () => {
   const { agent, restrictions } = fakeAgent()
   agent.session = sessionWith([
     { type: 'user/message', data: { content: 'build it', source: { kind: 'user' } } },
-    { type: 'tool/call', data: { name: 'todo_write' } },
-    { type: 'tool/call', data: { name: 'write' } },
-    { type: 'tool/call', data: { name: 'ops_bash' } },
+    // The real completion chain: align, lock the plan, then pass the gate.
+    { type: 'tool/call', data: { name: 'ask_user_question' } },
+    { type: 'tool/call', data: { name: 'exit_plan_mode' } },
+    { type: 'tool/call', data: { name: 'delivery_check' } },
   ])
 
   await handlers.get('agent/pre-step')[0]({ agent }, () => Promise.resolve({ kind: 'enter' }))
@@ -230,4 +253,122 @@ test('router_advance moves the gate forward and reports the marker', async () =>
   assert.ok(widened.includes('todo_write'), 'phase 1 unlocks planning')
   assert.ok(widened.includes('read'), 'phase 1 keeps reading')
   assert.ok(!widened.includes('write'), 'phase 1 still does not write')
+})
+
+test('tools_catalog reads the live registry, not a hardcoded list', async () => {
+  const { ctx, registered } = fakeCtx()
+  apply(ctx, { mode: 'auto', phases: false })
+  const { agent } = fakeAgent()
+  agent.session = sessionWith([])
+
+  const catalog = await registered.find((entry) => entry.name === 'tools_catalog').execute({}, { agent })
+  assert.match(catalog.text, /visible tool\(s\)/)
+  assert.match(catalog.text, /read/)
+  // Phase marks come from the phase table, so the model can see where a tool lands.
+  assert.match(catalog.text, /\[phase 1\]/)
+
+  // A query narrows; a query matching nothing says so instead of dumping all.
+  const filtered = await registered.find((entry) => entry.name === 'tools_catalog').execute({ query: 'wr' }, { agent })
+  assert.match(filtered.text, /write/)
+  assert.doesNotMatch(filtered.text, /- read/)
+  const none = await registered.find((entry) => entry.name === 'tools_catalog').execute({ query: 'zzz' }, { agent })
+  assert.match(none.text, /No visible tool matches/)
+})
+
+test('tools_help returns one complete spec and marks its phase', async () => {
+  const { ctx, registered } = fakeCtx()
+  apply(ctx, { mode: 'auto', phases: false })
+  const { agent } = fakeAgent()
+  agent.session = sessionWith([])
+
+  const help = await registered.find((entry) => entry.name === 'tools_help').execute({ name: 'write' }, { agent })
+  assert.match(help.text, /^write — unlocked at phase 3/)
+  assert.match(help.text, /path: string/)
+  assert.match(help.text, /the write tool\./)
+
+  const missing = await registered.find((entry) => entry.name === 'tools_help').execute({ name: 'nope' }, { agent })
+  assert.match(missing.text, /No visible tool named "nope"/)
+})
+
+test('delivery_check fails an absent file and passes a real one', async () => {
+  const { ctx, registered } = fakeCtx()
+  apply(ctx, { mode: 'auto', phases: false })
+  const { agent } = fakeAgent()
+  const tool = registered.find((entry) => entry.name === 'delivery_check')
+
+  const missing = await tool.execute({ file: '', evidence: { items: [] } }, { agent })
+  assert.match(missing.text, /FAIL/)
+  assert.match(missing.text, /missing file parameter/)
+
+  const absent = await tool.execute({ file: 'does/not/exist.txt', evidence: { items: [] } }, { agent })
+  assert.match(absent.text, /FAIL/)
+  assert.match(absent.text, /file-exists/)
+
+  // The plugin's own manifest is a real, non-empty, UTF-8 file.
+  const real = await tool.execute({
+    file: new URL('../package.json', import.meta.url).pathname.replace(/^\//, ''),
+    evidence: { items: [{ label: 'manifest', kind: 'file', target: new URL('../package.json', import.meta.url).pathname.replace(/^\//, '') }, { label: 'n', kind: 'numeric', result: '30' }] },
+  }, { agent })
+  assert.match(real.text, /PASS/)
+  assert.match(real.text, /encoding-utf8/)
+})
+
+test('delivery_check rejects an evidence manifest with no items', async () => {
+  const { ctx, registered } = fakeCtx()
+  apply(ctx, { mode: 'auto', phases: false })
+  const { agent } = fakeAgent()
+  const tool = registered.find((entry) => entry.name === 'delivery_check')
+  const file = new URL('../package.json', import.meta.url).pathname.replace(/^\//, '')
+
+  const out = await tool.execute({ file, evidence: { items: [] } }, { agent })
+  assert.match(out.text, /FAIL/)
+  assert.match(out.text, /missing evidence items/)
+  assert.match(out.text, /do not report completion/)
+})
+
+test('router_begin reports the phase and its guidance', async () => {
+  const { ctx, registered } = fakeCtx()
+  apply(ctx, { mode: 'auto', phases: true })
+  const { agent } = fakeAgent()
+  agent.session = sessionWith([])
+
+  const out = await registered.find((entry) => entry.name === 'router_begin').execute({}, { agent })
+  assert.match(out.text, /Bootstrap confirmed — phase 1\/4/)
+  assert.match(out.text, /^Phase: understanding/m)
+})
+
+test('the assemble hook installs every guidance section', async () => {
+  const { ctx, handlers } = fakeCtx()
+  apply(ctx, { mode: 'weak', phases: false })
+  const { agent } = fakeAgent()
+  agent.session = sessionWith([])
+  const assembly = { sections: [{ name: 'base', text: 'base' }] }
+
+  const out = await handlers.get('system-prompt/assemble')[0](assembly, { agent }, () => Promise.resolve(assembly))
+  const names = out.sections.map((section) => section.name)
+  for (const expected of ['router-persona', 'router-decl', 'router-stage', 'router-proactivity', 'base']) {
+    assert.ok(names.includes(expected), `missing section ${expected}`)
+  }
+  const decl = out.sections.find((s) => s.name === 'router-decl')
+  assert.match(decl.text, /revealed in phases/)
+  const proactivity = out.sections.find((s) => s.name === 'router-proactivity')
+  assert.match(proactivity.text, /reversible/)
+  // The base prompt survives: this plugin adds guidance, it does not replace it.
+  assert.ok(names.includes('base'))
+})
+
+test('repeated assemblies never duplicate a section', async () => {
+  const { ctx, handlers } = fakeCtx()
+  apply(ctx, { mode: 'react', phases: false })
+  const { agent } = fakeAgent()
+  agent.session = sessionWith([])
+
+  let assembly = { sections: [{ name: 'base', text: 'base' }] }
+  for (let i = 0; i < 3; i++) {
+    assembly = await handlers.get('system-prompt/assemble')[0](assembly, { agent }, () => Promise.resolve(assembly))
+  }
+  const names = assembly.sections.map((section) => section.name)
+  assert.equal(names.filter((n) => n === 'router-stage').length, 1)
+  assert.equal(names.filter((n) => n === 'router-decl').length, 1)
+  assert.equal(names.filter((n) => n === 'router-persona').length, 1)
 })
