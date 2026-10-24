@@ -6,10 +6,10 @@
   "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "cordis", "routing", "agent"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hanxiao827/dsh-router.git"
+    "url": "git+https://github.com/xiao-hans/dsh-router.git"
   },
-  "homepage": "https://github.com/hanxiao827/dsh-router#readme",
-  "bugs": { "url": "https://github.com/hanxiao827/dsh-router/issues" },
+  "homepage": "https://github.com/xiao-hans/dsh-router#readme",
+  "bugs": { "url": "https://github.com/xiao-hans/dsh-router/issues" },
   "main": "lib/index.js",
   "exports": {
     ".": { "default": "./lib/index.js" },

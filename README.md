@@ -18,7 +18,7 @@ Install straight from GitHub — no npm publish required:
 
 ```bash
 cd ~/.dsh/profiles/desktop
-npm install github:hanxiao827/dsh-router
+npm install github:xiao-hans/dsh-router
 ```
 
 Then add `"dsh-router"` to the `dsh.profile.bundles` array in that `package.json`:
